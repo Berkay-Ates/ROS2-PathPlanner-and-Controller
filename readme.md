@@ -8,7 +8,7 @@ A custom differential-drive robot simulated in Gazebo, with a hand-written **A\*
 
 Clicking a goal in RViz ("2D Goal Pose") and watching A\* plan the route while Pure Pursuit drives the robot there:
 
-<video src="https://github.com/Berkay-Ates/ROS2-PathPlanner-and-Controller/raw/master/images/demo.mp4" controls muted width="700"></video>
+[<video src="https://github.com/Berkay-Ates/ROS2-PathPlanner-and-Controller/raw/master/images/demo.mp4" controls muted width="700"></video>](https://github.com/user-attachments/assets/85f63683-9cb8-4cd4-8e2d-423833364e5c)
 
 ### Screenshots
 
