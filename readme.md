@@ -1,77 +1,111 @@
-# Custom Robot Simulation Project
+# ROS2 Path Planner & Controller
+
+A custom differential-drive robot simulated in Gazebo, with a hand-written **A\* global planner** and a **Pure Pursuit** local controller driving it through a multi-room custom world — all visualized live in RViz.
+
+## Demo
+
+### End-to-end run
+
+Clicking a goal in RViz ("2D Goal Pose") and watching A\* plan the route while Pure Pursuit drives the robot there:
+
+<https://github.com/user-attachments/assets/PLACEHOLDER-video-id>
+
+*(video will be added here)*
+
+### Screenshots
+
+| | | |
+| --- | --- | --- |
+| ![demo 1](https://picsum.photos/seed/ros2-planner-1/500/320) | ![demo 2](https://picsum.photos/seed/ros2-planner-2/500/320) | ![demo 3](https://picsum.photos/seed/ros2-planner-3/500/320) |
+
+*(placeholder images from Lorem Picsum — real screenshots/gifs will replace these)*
 
 ## Overview
 
-> This project involves a custom robot simulation in Gazebo, utilizing ROS 2. The robot model is defined using URDF and Xacro files, and the project includes a camera sensor for image processing.
+The robot (URDF/Xacro, diff-drive base + LiDAR + camera) is spawned into a custom Gazebo world and driven with a classic two-stage navigation stack:
 
-![Project Structure Image](/images/rviz.png)
+1. **`path_planner_node`** — subscribes to `map` (`nav_msgs/OccupancyGrid`), `odom`, and `goal_pose`. On every new goal it inflates the obstacle cells for safety margin, runs 8-connected **A\*** over the grid, smooths the result with Catmull-Rom interpolation, and publishes it once as a `nav_msgs/Path` on `plan`.
+2. **`pure_pursuit_controller_node`** — subscribes to `odom` and `plan`, and at a fixed control rate chases a lookahead point along that path, publishing `cmd_vel`.
 
-## Project Structure
+Both are plain C++ (`rclcpp`), since the planner does real per-cell grid work (A\* + inflation) where that pays off, while the controller's per-tick loop is light enough that the language barely matters.
 
-The project is structured as follows:
+## Packages
 
-- **Launch File**: `custom_robot_gazebo.launch.xml` - Main launch file to start the Gazebo simulation and RViz visualization.
+| Package | Type | What it does |
+| --- | --- | --- |
+| `custom_robot_description` | C++/URDF | Robot model (Xacro): differential-drive base, LiDAR, camera, RViz display config |
+| `custom_robot_bringup` | launch/worlds | Gazebo + RViz bring-up, the custom `complex_world.world`, spawn logic |
+| `path_planner_controller` | C++ | `path_planner_node` (A\*), `pure_pursuit_controller_node`, plus a Python `world_map_publisher.py` helper (see below) |
+| `lidar_driver` | C++ | `lidar_subscriber_node` — reads `/scan`, logs range/intensity data |
+| `camera_driver` | C++ | `camera_subscriber_node` — reads `/camera_sensor/image_raw` |
 
-- **Camera Subscriber**: `camera_subscriber.cpp` - C++ code to subscribe to the camera topic and process the images.
-  ![Camera Structure Image](/images/camera.png)
-  TODO
+## The world: `complex_world.world`
 
-- **LiDAR Subscriber**: `lidar_subscriber.cpp `- C++ code to subscribe to the LiDAR topic and process the scanned data.
+A 12m × 10m arena split into three connected rooms, built specifically to stress-test the planner/controller pair:
 
-![gazebo.png](/images/gazebo_new.png)
+- **Maze room** — a zig-zag corridor made of alternating wall baffles.
+- **Open room** (robot spawn point) — scattered cylindrical pillars of different sizes/colors for basic obstacle clearance.
+- **Slalom + goal room** — another baffle zig-zag ending in an alcove with a couple of crates.
 
-## How to Run
+Rooms are connected through 1m-wide gated openings.
 
-### Prerequisites
+## The map: `world_map_publisher.py`
 
-- ROS 2 installed.
-- Gazebo installed.
-- Custom robot packages (`custom_robot_description`, `custom_robot_bringup`) correctly set up.
+There's no SLAM/`map_server` in this project — `path_planner_node` needs an `OccupancyGrid` to plan on, so `world_map_publisher.py` (a small standalone `rclpy` script) rasterizes the exact same wall/pillar coordinates from `complex_world.world` into a `nav_msgs/OccupancyGrid` and republishes it on `map` at 1 Hz (transient-local QoS, so RViz's Map display picks it up on late join too). It's intentionally a script, not a full package node — it only needs to exist for as long as there's no real localization/mapping stack.
 
-### Steps
+> ⚠️ Because the map is a hand-authored mirror of the world file, if you ever edit `complex_world.world`'s geometry, update the `WALLS`/`PILLARS` lists in `world_map_publisher.py` to match.
 
-1. **Build the Workspace**:
+## How to run
 
-   ```sh
-   colcon build
-   ```
+```sh
+colcon build --symlink-install
+source install/setup.bash
 
-2. **Source the Setup Files:**:
-   ```sh
-   source install/setup.bash
-   ```
-3. **Launch the Simulation:**:
-   ```sh
-   ros2 launch custom_robot_gazebo.launch.xml
-   ```
-4. **Run the Camera Subscriber Node:**:
-   ```sh
-   ros2 run camera_driver camera_subscriber_node
-   ```
-5. **Run the Lidar Subscriber Node:**:
-   ```sh
-   ros2 run lidar_driver lidar_subscriber_node
-   ```
+# 1) Gazebo + robot + RViz
+ros2 launch custom_robot_bringup custom_robot_gazebo.launch.xml
 
-## Purpose
+# 2) the synthetic map (separate terminal)
+python3 src/path_planner_controller/scripts/world_map_publisher.py
 
-> The primary goal of this project is to simulate a custom robot in Gazebo, visualize it in RViz, and process camera images for various applications. This setup can be extended to include more sensors and advanced functionalities.
+# 3) planner + controller (separate terminal)
+ros2 launch path_planner_controller path_follow.launch.py
+```
 
-## Future Works
+Then send a goal either of two ways:
 
-> Roadmap, in the order we're tackling it:
+- **In RViz**, click **2D Goal Pose** on the toolbar and click-drag on the map.
+- **From a terminal**:
 
-1.  **SIMD lidar processing** - process raw `/scan` data (polar-to-cartesian conversion, min-range/obstacle-distance reduction) using AVX2 intrinsics, with a scalar fallback and a measured speedup comparison. `[in progress]`
-2.  **GPU (CUDA) lidar processing** - port the same processing pipeline to a hand-written CUDA kernel and benchmark scalar vs SIMD vs GPU on the RTX 3060 to see where each approach actually pays off. `[planned]`
-3.  **Add a drone** - a simple quadrotor xacro model + Gazebo plugin, integrated alongside the existing ground robot so both can run together in the same world. `[planned]`
-4.  Add more sensors to the robot model.
-5.  Implement advanced image processing algorithms.
-6.  Integrate with other ROS 2 packages for extended functionality.
-7.  Implement an autonomous algorithm using camera and lidar sensor data.
+  ```sh
+  ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+    "{header: {frame_id: 'odom'}, pose: {position: {x: 2.6, y: -4.3, z: 0.0}, orientation: {w: 1.0}}}"
+  ```
 
-## Notes
+### Useful tuning parameters
 
-Ensure the paths in the launch file are correctly set according to your workspace setup.
-Modify the camera_subscriber.cpp file to include your image processing code.
+| Node | Parameter | Default | Notes |
+| --- | --- | --- | --- |
+| `path_planner_node` | `expansion_size` | `2` | Obstacle inflation, in grid cells (`resolution` m each). Must clear the robot's own half-width/length or the planned path will graze walls. |
+| `path_planner_node` | `smoothing_samples_per_segment` | `5` | Catmull-Rom smoothing density |
+| `pure_pursuit_controller_node` | `lookahead_distance` | `0.15` | How far ahead on the path it aims |
+| `pure_pursuit_controller_node` | `linear_speed` | `0.1` | Constant forward speed while on-path |
+| `pure_pursuit_controller_node` | `goal_tolerance` | `0.05` | Distance to consider the goal reached |
 
-This README provides an overview and instructions to get started with the custom robot simulation project in ROS 2.
+Override any of them with `--ros-args -p name:=value` at launch.
+
+## Known limitations
+
+- **No dynamic obstacle avoidance.** The planner never looks at `/scan` — it only ever sees the static synthetic map. Something stepping into the path won't be noticed.
+- **No localization.** Odometry only (wheel encoders via Gazebo's `diff_drive` plugin) — no AMCL/scan-matching correction, so position drifts slowly over time.
+- **Plan-once, not receding-horizon.** A\* runs exactly once per `goal_pose` message, not continuously — if the robot gets knocked off-path, it keeps chasing the same stale path rather than replanning.
+
+These are the natural next steps if this grows into something closer to a full nav stack.
+
+## Future Work
+
+1. **LiDAR-based dynamic stop/replan** — use `/scan` to at least halt (or trigger a replan) when something blocks the path.
+2. **SIMD LiDAR processing** — AVX2 polar-to-cartesian + min-range reduction, scalar fallback, measured speedup. `[planned]`
+3. **GPU (CUDA) LiDAR processing** — same pipeline as a CUDA kernel, benchmarked against scalar/SIMD. `[planned]`
+4. **Add a drone** — a simple quadrotor Xacro + Gazebo plugin alongside the ground robot. `[planned]`
+5. Basic localization (AMCL or scan-matching) instead of raw odometry.
+6. Swap the hand-authored map for real SLAM (`slam_toolbox`) output.
