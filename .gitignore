@@ -12,6 +12,10 @@ src/lidar_driver/**/intensity.txt
 *.swp
 .DS_Store
 
+# Python bytecode cache (scripts/ dir has standalone rclpy scripts, no setup.py)
+__pycache__/
+*.pyc
+
 
 # Trash folders
 ROS2-PurePursuitControl-PathPlanning-Tracking/
