@@ -20,7 +20,7 @@ private:
         {
 
             cv::Mat image = cv_bridge::toCvCopy(msg, "bgr8")->image;
-            // Görüntü işleme kodu buraya
+            // Image processing code goes here
             int height = msg->height;
             int width = msg->width;
             std::vector<unsigned char> data = msg->data;

@@ -8,17 +8,14 @@ A custom differential-drive robot simulated in Gazebo, with a hand-written **A\*
 
 Clicking a goal in RViz ("2D Goal Pose") and watching A\* plan the route while Pure Pursuit drives the robot there:
 
-<https://github.com/user-attachments/assets/PLACEHOLDER-video-id>
-
-*(video will be added here)*
+<video src="https://github.com/Berkay-Ates/ROS2-PathPlanner-and-Controller/raw/master/images/demo.mp4" controls muted width="700"></video>
 
 ### Screenshots
 
 | | | |
 | --- | --- | --- |
-| ![demo 1](https://picsum.photos/seed/ros2-planner-1/500/320) | ![demo 2](https://picsum.photos/seed/ros2-planner-2/500/320) | ![demo 3](https://picsum.photos/seed/ros2-planner-3/500/320) |
-
-*(placeholder images from Lorem Picsum — real screenshots/gifs will replace these)*
+| <img src="images/im1.png" width="330" alt="Gazebo view of the robot next to the open room's cylindrical pillars"> | <img src="images/im2.png" width="330" alt="Gazebo overview of the robot navigating the maze/slalom rooms with the LiDAR scan cone visible"> | <img src="images/im3.png" width="330" alt="RViz showing the occupancy map, the A* plan, and the live LaserScan"> |
+| Gazebo — open room, pillars | Gazebo — maze/slalom rooms, LiDAR cone | RViz — map + A\* plan + LaserScan |
 
 ## Overview
 

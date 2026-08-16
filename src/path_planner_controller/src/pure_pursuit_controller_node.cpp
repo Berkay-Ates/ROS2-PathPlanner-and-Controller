@@ -1,8 +1,9 @@
 // pure_pursuit_controller_node
 //
-// ROS2-PurePursuitControl-PathPlanning-Tracking projesindeki nav_controller/control.py
-// dosyasinin pure_pursuit() ve timer_callback() kismini C++'a tasir. path_planner_node'un
-// yayinladigi "plan" (nav_msgs/Path) uzerinde Pure Pursuit ile ilerler ve "cmd_vel" uretir.
+// Ports the pure_pursuit() and timer_callback() parts of nav_controller/control.py
+// (from the ROS2-PurePursuitControl-PathPlanning-Tracking project) to C++. Follows the
+// "plan" (nav_msgs/Path) published by path_planner_node using Pure Pursuit and produces
+// "cmd_vel".
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -22,8 +23,8 @@ class PurePursuitControllerNode : public rclcpp::Node
 public:
     PurePursuitControllerNode() : Node("pure_pursuit_controller_node")
     {
-        this->declare_parameter<double>("lookahead_distance", 0.15);
-        this->declare_parameter<double>("linear_speed", 0.1);
+        this->declare_parameter<double>("lookahead_distance", 0.3);
+        this->declare_parameter<double>("linear_speed", 0.3);
         this->declare_parameter<double>("goal_tolerance", 0.05);
         this->declare_parameter<double>("max_steering_angle", M_PI / 6.0);
         this->declare_parameter<double>("control_period", 0.05);
@@ -44,7 +45,7 @@ public:
             std::chrono::duration<double>(control_period),
             std::bind(&PurePursuitControllerNode::controlLoop, this));
 
-        RCLCPP_INFO(this->get_logger(), "pure_pursuit_controller_node baslatildi, yol bekleniyor...");
+        RCLCPP_INFO(this->get_logger(), "pure_pursuit_controller_node started, waiting for a path...");
     }
 
 private:
@@ -66,7 +67,7 @@ private:
         }
         path_index_ = 0;
         goal_reached_ = false;
-        RCLCPP_INFO(this->get_logger(), "Yeni yol alindi (%zu nokta), hedefe ilerleniyor...", path_.size());
+        RCLCPP_INFO(this->get_logger(), "New path received (%zu points), heading to goal...", path_.size());
     }
 
     void controlLoop()
@@ -98,14 +99,15 @@ private:
             cmd.linear.x = 0.0;
             cmd.angular.z = 0.0;
             goal_reached_ = true;
-            RCLCPP_INFO(this->get_logger(), "Hedefe ulasildi.");
+            RCLCPP_INFO(this->get_logger(), "Goal reached.");
         }
 
         cmd_vel_pub_->publish(cmd);
     }
 
-    // path_index_'ten baslayarak robota lookahead_distance_'tan daha uzak ilk noktayi bulur
-    // (python versiyonundaki pure_pursuit() ile ayni mantik). Bulunamazsa yolun son noktasi donulur.
+    // Starting from path_index_, finds the first point farther from the robot than
+    // lookahead_distance_ (same logic as pure_pursuit() in the Python version). If none
+    // is found, returns the last point of the path.
     std::pair<double, double> findLookaheadPoint()
     {
         for (size_t i = path_index_; i < path_.size(); ++i)

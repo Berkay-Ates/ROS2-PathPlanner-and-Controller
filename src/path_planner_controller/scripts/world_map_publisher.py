@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """world_map_publisher
 
-complex_world.world icindeki duvar/direk/sandik geometrisinden elle bir
-nav_msgs/OccupancyGrid uretip "map" topic'ine surekli (1 Hz) yayinlar.
-Amac: path_planner_node (A*) + pure_pursuit_controller_node pipeline'ini
-gercek bir SLAM/map_server olmadan, dogrudan test edebilmek.
+Hand-builds a nav_msgs/OccupancyGrid from the wall/pillar/crate geometry in
+complex_world.world and continuously publishes it (1 Hz) on the "map" topic.
+Purpose: let the path_planner_node (A*) + pure_pursuit_controller_node
+pipeline be tested directly, without a real SLAM/map_server.
 
-Surekli yayinlanmasinin sebebi: path_planner_node bir /goal_pose gelene
-kadar map mesajlarini yok sayiyor (need_plan_ == false), bu yuzden map'i
-tek seferlik degil periyodik gondermek gerekiyor ki goal_pose'dan SONRA
-gelecek bir map mesaji planlamayi tetiklesin.
+Why it publishes continuously instead of once: path_planner_node ignores map
+messages until a /goal_pose arrives (need_plan_ == false), so the map has to
+be sent periodically rather than once, so that a map message arriving AFTER
+goal_pose triggers planning.
 
-Kullanim:
+Usage:
     source /opt/ros/humble/setup.bash
     python3 world_map_publisher.py
 """
@@ -26,33 +26,33 @@ ORIGIN_Y = -5.0
 WIDTH = 240   # 12m / 0.05
 HEIGHT = 200  # 10m / 0.05
 
-# (cx, cy, size_x, size_y) -- complex_world.world'deki tum static kutu duvarlar
+# (cx, cy, size_x, size_y) -- all static box walls in complex_world.world
 WALLS = [
-    # dis sinirlar
+    # outer boundaries
     (0.0, 5.0, 12.24, 0.12),
     (0.0, -5.0, 12.24, 0.12),
     (6.0, 0.0, 0.12, 10.0),
     (-6.0, 0.0, 0.12, 10.0),
-    # oda ayiricilar (x=-2 ve x=2), y=[-0.5,0.5] arasi 1m kapi bosluklu
+    # room dividers (x=-2 and x=2), with a 1m door gap in y=[-0.5,0.5]
     (-2.0, 2.75, 0.12, 4.5),
     (-2.0, -2.75, 0.12, 4.5),
     (2.0, 2.75, 0.12, 4.5),
     (2.0, -2.75, 0.12, 4.5),
-    # labirent bariyerleri (sol oda)
+    # maze baffles (left room)
     (-4.9, 3.2, 2.2, 0.12),
     (-3.1, 1.0, 2.2, 0.12),
     (-4.9, -1.2, 2.2, 0.12),
     (-3.1, -3.4, 2.2, 0.12),
-    # slalom bariyerleri (sag oda)
+    # slalom baffles (right room)
     (3.1, 3.0, 2.2, 0.12),
     (4.9, 0.5, 2.2, 0.12),
     (3.1, -2.5, 2.2, 0.12),
-    # hedef kosedeki sandiklar (kaba kutu yaklasimi, rotasyon ihmal edildi)
+    # crates in the goal corner (rough box approximation, rotation ignored)
     (5.3, 4.0, 0.5, 0.5),
     (4.6, 4.4, 0.4, 0.4),
 ]
 
-# (cx, cy, radius) -- orta odadaki dagitilmis silindir direkler
+# (cx, cy, radius) -- scattered cylindrical pillars in the middle room
 PILLARS = [
     (-0.8, 3.0, 0.3),
     (1.0, 2.0, 0.2),
@@ -85,10 +85,10 @@ def build_grid():
 class WorldMapPublisher(Node):
     def __init__(self):
         super().__init__('world_map_publisher')
-        # RViz'in Map display'i varsayilan olarak Transient Local (latched) yayin
-        # bekliyor; Volatile QoS ile eslesmiyordu. path_planner_node'un kendi
-        # (Volatile) map_sub_'i ile de uyumlu (offered TRANSIENT_LOCAL >= requested
-        # VOLATILE gecerli bir eslesme).
+        # RViz's Map display expects Transient Local (latched) publishing by default;
+        # it didn't match with Volatile QoS. Also compatible with path_planner_node's
+        # own (Volatile) map_sub_ (offered TRANSIENT_LOCAL >= requested VOLATILE is a
+        # valid match).
         map_qos = QoSProfile(
             depth=1,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -98,8 +98,8 @@ class WorldMapPublisher(Node):
         self.grid_data = build_grid()
         self.timer = self.create_timer(1.0, self.publish_map)
         self.get_logger().info(
-            f'complex_world haritasi hazir: {WIDTH}x{HEIGHT} hucre, '
-            f'{RESOLUTION} m/hucre, "map" topic\'ine 1 Hz yayinlaniyor.')
+            f'complex_world map ready: {WIDTH}x{HEIGHT} cells, '
+            f'{RESOLUTION} m/cell, publishing on "map" topic at 1 Hz.')
 
     def publish_map(self):
         msg = OccupancyGrid()

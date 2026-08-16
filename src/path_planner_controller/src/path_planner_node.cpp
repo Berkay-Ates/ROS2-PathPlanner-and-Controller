@@ -1,9 +1,10 @@
 // path_planner_node
 //
-// ROS2-PurePursuitControl-PathPlanning-Tracking projesindeki nav_controller/control.py
-// dosyasinin planlama kismini (costmap inflation + A* + yol yumusatma) C++'a tasir.
-// Pure Pursuit takip kismi ayri bir node'da (pure_pursuit_controller_node) yasar,
-// aralarindaki kopru nav_msgs/Path mesajidir ("plan" topic'i).
+// Ports the planning part (costmap inflation + A* + path smoothing) of
+// nav_controller/control.py (from the ROS2-PurePursuitControl-PathPlanning-Tracking
+// project) to C++. The Pure Pursuit tracking part lives in a separate node
+// (pure_pursuit_controller_node); the bridge between them is the nav_msgs/Path
+// message (the "plan" topic).
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -25,7 +26,7 @@ class PathPlannerNode : public rclcpp::Node
 public:
     PathPlannerNode() : Node("path_planner_node")
     {
-        this->declare_parameter<int>("expansion_size", 2);
+        this->declare_parameter<int>("expansion_size", 6);
         this->declare_parameter<int>("smoothing_samples_per_segment", 5);
 
         expansion_size_ = this->get_parameter("expansion_size").as_int();
@@ -40,7 +41,7 @@ public:
 
         path_pub_ = this->create_publisher<nav_msgs::msg::Path>("plan", 10);
 
-        RCLCPP_INFO(this->get_logger(), "path_planner_node baslatildi, hedef bekleniyor...");
+        RCLCPP_INFO(this->get_logger(), "path_planner_node started, waiting for a goal...");
     }
 
 private:
@@ -59,7 +60,7 @@ private:
         goal_y_ = msg->pose.position.y;
         have_goal_ = true;
         need_plan_ = true;
-        RCLCPP_INFO(this->get_logger(), "Yeni hedef alindi: (%.2f, %.2f)", goal_x_, goal_y_);
+        RCLCPP_INFO(this->get_logger(), "New goal received: (%.2f, %.2f)", goal_x_, goal_y_);
     }
 
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
@@ -81,10 +82,10 @@ private:
             return;
         }
 
-        // OccupancyGrid -> engelli hucre grid'i. Sadece kesin duvarlar (100) sisirilir;
-        // bilinmeyen (-1) hucreler sisirme olmadan dogrudan engel sayilir. Bilinmeyeni de
-        // sisirirsek robotun etrafindaki henuz taranmamis kucuk bos bolge tamamen yutulur
-        // ve robot kendi baslangic hucresine hapsolur.
+        // OccupancyGrid -> occupied-cell grid. Only confirmed walls (100) get inflated;
+        // unknown (-1) cells are counted as obstacles directly, without inflation. If we
+        // inflated unknown cells too, the small not-yet-scanned free area around the robot
+        // would be swallowed entirely and the robot would get trapped in its own start cell.
         std::vector<bool> occupied(static_cast<size_t>(width) * height, false);
         for (size_t i = 0; i < occupied.size(); ++i)
         {
@@ -106,16 +107,16 @@ private:
 
         if (!inBounds(start_row, start_col, width, height) || !inBounds(goal_row, goal_col, width, height))
         {
-            RCLCPP_WARN(this->get_logger(), "Baslangic veya hedef harita sinirlarinin disinda.");
+            RCLCPP_WARN(this->get_logger(), "Start or goal is outside the map bounds.");
             return;
         }
 
-        occupied[static_cast<size_t>(start_row) * width + start_col] = false;  // robotun oldugu hucre daima gecilebilir
+        occupied[static_cast<size_t>(start_row) * width + start_col] = false;  // the robot's own cell is always passable
 
         const auto grid_path = aStar(occupied, width, height, {start_row, start_col}, {goal_row, goal_col});
         if (grid_path.empty())
         {
-            RCLCPP_WARN(this->get_logger(), "A* ile yol bulunamadi.");
+            RCLCPP_WARN(this->get_logger(), "A* could not find a path.");
             return;
         }
 
@@ -130,17 +131,17 @@ private:
         publishPath(smoothed, msg->header.frame_id);
 
         need_plan_ = false;
-        RCLCPP_INFO(this->get_logger(), "Yol yayinlandi (%zu nokta), hedefe ilerleniyor...", smoothed.size());
+        RCLCPP_INFO(this->get_logger(), "Path published (%zu points), heading to goal...", smoothed.size());
     }
 
-    // --- yardimcilar ---------------------------------------------------------
+    // --- helpers ---------------------------------------------------------
 
     static bool inBounds(int row, int col, int width, int height)
     {
         return row >= 0 && row < height && col >= 0 && col < width;
     }
 
-    // Engel hucrelerini 'expansion' hucre kadar sisirir (duvarlara guvenlik payi birakmak icin).
+    // Inflates obstacle cells by 'expansion' cells (to leave a safety margin around walls).
     static void inflate(std::vector<bool> &occupied, int width, int height, int expansion)
     {
         if (expansion <= 0)
@@ -172,9 +173,9 @@ private:
         }
     }
 
-    // 8-komsulu A*. Grid indeksi = row * width + col. Hedefe ulasilamazsa,
-    // ziyaret edilen hucreler arasindan hedefe en yakin olani doner (python
-    // versiyonundaki "closest_node" fallback'i ile ayni davranis).
+    // 8-connected A*. Grid index = row * width + col. If the goal is unreachable,
+    // returns the visited cell closest to the goal (same behavior as the "closest_node"
+    // fallback in the Python version).
     static std::vector<std::pair<int, int>> aStar(
         const std::vector<bool> &occupied, int width, int height,
         std::pair<int, int> start, std::pair<int, int> goal)
@@ -283,8 +284,8 @@ private:
         return path;
     }
 
-    // Catmull-Rom kubik spline ile kose noktalarindan gecen yumusak bir yol uretir
-    // (scipy tabanli bspline_planning()'in bagimliliksiz C++ karsiligi).
+    // Produces a smooth path through the corner points using a Catmull-Rom cubic spline
+    // (a dependency-free C++ equivalent of the scipy-based bspline_planning()).
     static std::vector<std::pair<double, double>> catmullRomSmooth(
         const std::vector<std::pair<double, double>> &pts, int samples_per_segment)
     {
@@ -346,7 +347,7 @@ private:
         path_pub_->publish(path_msg);
     }
 
-    // --- uyeler ---------------------------------------------------------
+    // --- members ---------------------------------------------------------
 
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
